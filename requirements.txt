@@ -1,0 +1,11 @@
+pandas
+numpy
+scikit-learn
+imbalanced-learn
+catboost
+optuna
+joblib
+langchain
+langchain-core
+langchain-groq
+python-dotenv
