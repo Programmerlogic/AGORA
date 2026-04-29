@@ -309,4 +309,5 @@ AGORA is designed as a human-in-the-loop risk analysis system: the ML model prov
 
 ## Visuals
 <img width="1920" height="3115" alt="screencapture-localhost-8502-2026-04-29-03_29_31" src="https://github.com/user-attachments/assets/a6cc140a-e740-4848-b5cc-9eacea80927c" />
+<img width="1920" height="3401" alt="chatbot" src="https://github.com/user-attachments/assets/475ed998-1121-4610-8c2b-5be427af2471" />
 
