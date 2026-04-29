@@ -66,7 +66,7 @@ The model training workflow is documented in `train.ipynb`.
 
 Training approach:
 
-- Loaded the full transaction dataset from `log.csv`.
+- Loaded the full transaction dataset from.
 - Addressed extreme class imbalance through majority-class downsampling.
 - Downsampled normal transactions to `82,000`.
 - Combined downsampled normal transactions with all `8,213` fraud transactions.
