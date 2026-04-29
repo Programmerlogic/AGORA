@@ -16,7 +16,7 @@ This design keeps the fast ML model in the critical path while adding explainabl
 
 ## Dataset Description
 
-Online Fraud Detection Dataset :- [Kaggale](https://www.kaggle.com/datasets/rupakroy/online-payments-fraud-detection-dataset/code) .
+The project uses a PaySim-style transaction dataset stored locally as `log.csv`.
 
 Dataset shape:
 
@@ -66,7 +66,7 @@ The model training workflow is documented in `train.ipynb`.
 
 Training approach:
 
-- Loaded the full transaction dataset from.
+- Loaded the full transaction dataset from `log.csv`.
 - Addressed extreme class imbalance through majority-class downsampling.
 - Downsampled normal transactions to `82,000`.
 - Combined downsampled normal transactions with all `8,213` fraud transactions.
@@ -149,23 +149,25 @@ AGORA follows an end-to-end risk monitoring workflow.
 
    Investigation outputs are stored in SQLite with structured fields such as verdict, confidence, risk score, reason code, reason tags, evidence, and investigation steps.
 
-7. **Reroute command and backend acknowledgment**
+7. **Held transaction command and backend acknowledgment**
 
-   If the agent marks a case as requiring human verification, the dashboard creates a `reroute` JSON control command for the `manual_review_queue`.
+   If the agent returns `BLOCK`, the dashboard does not immediately finalize the transaction as blocked. It creates a `hold` JSON control command for the `manual_review_queue` and stores the event with `final_status = HELD_PENDING_APPROVAL`.
 
-   A local SQLite-backed simulated backend stores the command and returns a `success` acknowledgment, making the control loop bidirectional: AGORA sends the command and records the backend response.
+   A local SQLite-backed simulated backend stores the command and returns an acknowledgment. The live stream continues processing other transactions while the held transaction waits for analyst action.
 
 8. **Analyst review**
 
-   A human analyst can review a selected investigation case in the dashboard.
+   A human analyst can review a held transaction in the dashboard.
 
    The analyst can choose:
 
+   - `APPROVE_RELEASE`
    - `CONFIRM_BLOCK`
-   - `MARK_FALSE_POSITIVE`
    - `ESCALATE`
 
-   The analyst can also add a manual note. Reviews are saved in the `analyst_reviews` table for auditability.
+   `APPROVE_RELEASE` changes the transaction to `RELEASED_AFTER_APPROVAL` and records a `release` command. `CONFIRM_BLOCK` changes it to `BLOCKED_CONFIRMED` and records a `confirm_block` command. `ESCALATE` changes it to `ESCALATED`.
+
+   The analyst can also add a manual note. Reviews are saved in the `analyst_reviews` table, approval fields are updated in `investigation_events`, and simulated backend commands are stored in `control_commands`.
 
 9. **DB insights**
 
@@ -208,7 +210,7 @@ The Streamlit dashboard in `dashboard.py` provides:
 
 - Live transaction monitoring.
 - CatBoost anomaly counts.
-- Agent-blocked transaction counts.
+- Held transaction counts.
 - ML override counts.
 - Total latency reporting.
 - Transaction-type classification charts.
@@ -216,8 +218,8 @@ The Streamlit dashboard in `dashboard.py` provides:
 - Decision funnel visualization.
 - Investigation event log.
 - Investigation reason details.
-- Reroute-to-human-verification command status.
-- Analyst review and manual note capture.
+- Hold/release/confirm-block command status.
+- Analyst approval, block confirmation, escalation, and manual note capture.
 - CSV/JSON export for investigation logs.
 
 The live monitoring section uses Streamlit fragments so the live stream can update without forcing a full app rerun for every transaction.
@@ -251,7 +253,7 @@ Which users have the highest fraud transaction counts?
 | --- | --- |
 | `log.csv` | Full transaction dataset. |
 | `populate_db.py` | Loads `log.csv` into SQLite and creates indexes. |
-| `agora_transactions.db` | SQLite database for transactions, investigation events, and analyst reviews. |
+| `agora_transactions.db` | SQLite database for transactions, investigation events, analyst reviews, and simulated backend control commands. |
 | `train.ipynb` | Model training, evaluation, and test-stream export notebook. |
 | `agora_fraud_model.cbm` | Trained CatBoost model artifact. |
 | `X_test.csv` | Test feature rows used for live stream simulation. |
@@ -304,10 +306,6 @@ This project demonstrates a practical fraud-risk architecture, but production de
 - Durable audit logging with backup and retention policies.
 - Human review policies for high-impact decisions.
 - Additional validation before any automated blocking action is applied to real customers.
+- Replacement of the local SQLite simulated backend with real payment hold/release APIs.
 
 AGORA is designed as a human-in-the-loop risk analysis system: the ML model provides speed, the agent provides contextual investigation, and the analyst review layer provides operational accountability.
-
-## Visuals
-<img width="1920" height="3115" alt="screencapture-localhost-8502-2026-04-29-03_29_31" src="https://github.com/user-attachments/assets/a6cc140a-e740-4848-b5cc-9eacea80927c" />
-<img width="1920" height="3401" alt="chatbot" src="https://github.com/user-attachments/assets/475ed998-1121-4610-8c2b-5be427af2471" />
-

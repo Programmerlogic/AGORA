@@ -28,6 +28,7 @@ MODEL_FEATURE_COLUMNS = [
     "oldbalanceDest",
     "newbalanceDest",
 ]
+DEFAULT_REVIEWER = "dashboard_analyst"
 
 
 @st.cache_resource
@@ -170,6 +171,13 @@ def init_audit_tables() -> None:
                 "control_status": "control_status TEXT",
                 "control_command_json": "control_command_json TEXT",
                 "control_ack_json": "control_ack_json TEXT",
+                "approval_status": "approval_status TEXT",
+                "approval_action": "approval_action TEXT",
+                "approval_time": "approval_time TEXT",
+                "approval_note": "approval_note TEXT",
+                "reviewed_by": "reviewed_by TEXT",
+                "release_command_json": "release_command_json TEXT",
+                "release_ack_json": "release_ack_json TEXT",
             },
         )
         conn.commit()
@@ -212,49 +220,59 @@ def ensure_fresh_boot_state() -> None:
 
 
 def persist_investigation_event(event: dict) -> None:
+    columns = [
+        "event_id",
+        "event_time",
+        "stream_index",
+        "step",
+        "nameOrig",
+        "nameDest",
+        "txn_type",
+        "amount",
+        "ml_prediction",
+        "ground_truth",
+        "final_status",
+        "final_verdict",
+        "ml_correction",
+        "confidence_score",
+        "risk_score",
+        "fallback_used",
+        "reasoning",
+        "reason_code",
+        "reason_tags_json",
+        "control_action",
+        "control_status",
+        "control_command_json",
+        "control_ack_json",
+        "approval_status",
+        "approval_action",
+        "approval_time",
+        "approval_note",
+        "reviewed_by",
+        "release_command_json",
+        "release_ack_json",
+        "evidence_json",
+        "tool_trace_json",
+        "agent_latency_s",
+        "ml_latency_ms",
+        "total_latency_ms",
+        "raw_investigation_json",
+    ]
+    values = []
+    for column in columns:
+        value = event.get(column)
+        if column in {"ml_correction", "fallback_used"}:
+            value = int(bool(value))
+        values.append(value)
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            """
+            f"""
             INSERT OR REPLACE INTO investigation_events (
-                event_id, event_time, stream_index, step, nameOrig, nameDest, txn_type,
-                amount, ml_prediction, ground_truth, final_status, final_verdict,
-                ml_correction, confidence_score, risk_score, fallback_used, reasoning,
-                reason_code, reason_tags_json, control_action, control_status,
-                control_command_json, control_ack_json, evidence_json, tool_trace_json, agent_latency_s, ml_latency_ms,
-                total_latency_ms, raw_investigation_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                {", ".join(columns)}
+            ) VALUES ({", ".join(["?"] * len(columns))})
             """,
-            (
-                event.get("event_id"),
-                event.get("event_time"),
-                event.get("stream_index"),
-                event.get("step"),
-                event.get("nameOrig"),
-                event.get("nameDest"),
-                event.get("txn_type"),
-                event.get("amount"),
-                event.get("ml_prediction"),
-                event.get("ground_truth"),
-                event.get("final_status"),
-                event.get("final_verdict"),
-                int(bool(event.get("ml_correction"))),
-                event.get("confidence_score"),
-                event.get("risk_score"),
-                int(bool(event.get("fallback_used"))),
-                event.get("reasoning"),
-                event.get("reason_code"),
-                event.get("reason_tags_json"),
-                event.get("control_action"),
-                event.get("control_status"),
-                event.get("control_command_json"),
-                event.get("control_ack_json"),
-                event.get("evidence_json"),
-                event.get("tool_trace_json"),
-                event.get("agent_latency_s"),
-                event.get("ml_latency_ms"),
-                event.get("total_latency_ms"),
-                event.get("raw_investigation_json"),
-            ),
+            tuple(values),
         )
         conn.commit()
 
@@ -334,7 +352,7 @@ def classify_outcome(
 
     verdict = investigation_output.final_verdict.upper()
     if verdict == "BLOCK":
-        return "BLOCKED", "Agent Blocked", True, True
+        return "HELD_PENDING_APPROVAL", "Held Pending Approval", True, True
     return "ML_OVERRIDDEN_ALLOW", "ML Fraud", True, False
 
 
@@ -347,39 +365,79 @@ def _safe_json_text(payload: dict | None) -> str:
         return str(payload)
 
 
-def issue_reroute_command(
+def _transaction_payload(
+    step: object,
+    name_orig: object,
+    name_dest: object,
+    txn_type: object,
+    amount: object,
+) -> dict:
+    return {
+        "step": int(step),
+        "nameOrig": str(name_orig),
+        "nameDest": str(name_dest),
+        "type": str(txn_type),
+        "amount": float(amount),
+    }
+
+
+def _transaction_payload_from_sample(sample: pd.Series) -> dict:
+    return _transaction_payload(
+        step=sample["step"],
+        name_orig=sample["nameOrig"],
+        name_dest=sample["nameDest"],
+        txn_type=sample["type"],
+        amount=sample["amount"],
+    )
+
+
+def _transaction_payload_from_event(row: pd.Series) -> dict:
+    return _transaction_payload(
+        step=row.get("step", 0),
+        name_orig=row.get("nameOrig", ""),
+        name_dest=row.get("nameDest", ""),
+        txn_type=row.get("txn_type", ""),
+        amount=row.get("amount", 0.0),
+    )
+
+
+def issue_control_command(
     event_id: str,
-    sample: pd.Series,
-    investigation_output: InvestigationResult,
-    reason_code: str,
+    transaction: dict,
+    command: str,
+    destination: str,
+    status: str,
+    reason: str,
+    requested_by: str,
+    reason_code: str = "",
+    risk_score: float | None = None,
+    note: str = "",
 ) -> tuple[dict, dict, str]:
-    command_id = f"CMD_{int(time.time() * 1000)}_{event_id}"
+    command_id = f"CMD_{int(time.time() * 1000)}_{event_id}_{command}"
     created_time = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-    destination = investigation_output.control_destination or "manual_review_queue"
     payload = {
-        "command": "reroute",
+        "command": command,
         "command_id": command_id,
         "event_id": event_id,
         "destination": destination,
-        "reason": "human_verification_required",
+        "reason": reason,
         "reason_code": reason_code,
-        "risk_score": investigation_output.risk_score,
-        "requested_by": "agora_agent",
-        "transaction": {
-            "step": int(sample["step"]),
-            "nameOrig": str(sample["nameOrig"]),
-            "nameDest": str(sample["nameDest"]),
-            "type": str(sample["type"]),
-            "amount": float(sample["amount"]),
-        },
+        "requested_by": requested_by,
+        "transaction": transaction,
     }
+    if risk_score is not None:
+        payload["risk_score"] = risk_score
+    if note:
+        payload["note"] = note
+
     ack = {
         "status": "success",
-        "command": "reroute",
+        "command": command,
         "command_id": command_id,
         "event_id": event_id,
-        "routed_to": destination,
-        "ack_id": f"ACK_{int(time.time() * 1000)}_{event_id}",
+        "control_status": status,
+        "destination": destination,
+        "ack_id": f"ACK_{int(time.time() * 1000)}_{event_id}_{command}",
         "acknowledged_at": created_time,
     }
     persist_control_command(
@@ -387,18 +445,151 @@ def issue_reroute_command(
             "command_id": command_id,
             "event_id": event_id,
             "created_time": created_time,
-            "nameOrig": str(sample["nameOrig"]),
-            "nameDest": str(sample["nameDest"]),
-            "txn_type": str(sample["type"]),
-            "amount": float(sample["amount"]),
-            "command": "reroute",
+            "nameOrig": transaction["nameOrig"],
+            "nameDest": transaction["nameDest"],
+            "txn_type": transaction["type"],
+            "amount": transaction["amount"],
+            "command": command,
             "destination": destination,
-            "status": ack["status"],
+            "status": status,
             "payload_json": _safe_json_text(payload),
             "ack_json": _safe_json_text(ack),
         }
     )
-    return payload, ack, str(ack["status"])
+    return payload, ack, status
+
+
+def issue_hold_command(
+    event_id: str,
+    sample: pd.Series,
+    investigation_output: InvestigationResult,
+    reason_code: str,
+) -> tuple[dict, dict, str]:
+    return issue_control_command(
+        event_id=event_id,
+        transaction=_transaction_payload_from_sample(sample),
+        command="hold",
+        destination=investigation_output.control_destination or "manual_review_queue",
+        status="pending_approval",
+        reason="ai_block_pending_analyst_approval",
+        requested_by="agora_agent",
+        reason_code=reason_code,
+        risk_score=investigation_output.risk_score,
+    )
+
+
+def update_investigation_approval(
+    event_id: str,
+    final_status: str,
+    approval_status: str,
+    approval_action: str,
+    approval_note: str,
+    reviewed_by: str,
+    control_action: str,
+    control_status: str,
+    release_payload: dict | None = None,
+    release_ack: dict | None = None,
+) -> None:
+    approval_time = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE investigation_events
+            SET final_status = ?,
+                approval_status = ?,
+                approval_action = ?,
+                approval_time = ?,
+                approval_note = ?,
+                reviewed_by = ?,
+                control_action = ?,
+                control_status = ?,
+                release_command_json = ?,
+                release_ack_json = ?
+            WHERE event_id = ?
+            """,
+            (
+                final_status,
+                approval_status,
+                approval_action,
+                approval_time,
+                approval_note,
+                reviewed_by,
+                control_action,
+                control_status,
+                _safe_json_text(release_payload),
+                _safe_json_text(release_ack),
+                event_id,
+            ),
+        )
+        conn.commit()
+
+
+def apply_analyst_approval(row: pd.Series, analyst_action: str, analyst_note: str) -> str:
+    event_id = str(row.get("event_id") or "")
+    transaction = _transaction_payload_from_event(row)
+    note = str(analyst_note or "")
+
+    if analyst_action == "APPROVE_RELEASE":
+        release_payload, release_ack, control_status = issue_control_command(
+            event_id=event_id,
+            transaction=transaction,
+            command="release",
+            destination="payment_processor",
+            status="released",
+            reason="analyst_approved_release",
+            requested_by=DEFAULT_REVIEWER,
+            risk_score=float(row.get("risk_score") or 0.0),
+            note=note,
+        )
+        update_investigation_approval(
+            event_id=event_id,
+            final_status="RELEASED_AFTER_APPROVAL",
+            approval_status="released",
+            approval_action=analyst_action,
+            approval_note=note,
+            reviewed_by=DEFAULT_REVIEWER,
+            control_action="release",
+            control_status=control_status,
+            release_payload=release_payload,
+            release_ack=release_ack,
+        )
+        return "Transaction released after analyst approval."
+
+    if analyst_action == "CONFIRM_BLOCK":
+        _, _, control_status = issue_control_command(
+            event_id=event_id,
+            transaction=transaction,
+            command="confirm_block",
+            destination="blocked_ledger",
+            status="blocked_confirmed",
+            reason="analyst_confirmed_ai_block",
+            requested_by=DEFAULT_REVIEWER,
+            risk_score=float(row.get("risk_score") or 0.0),
+            note=note,
+        )
+        update_investigation_approval(
+            event_id=event_id,
+            final_status="BLOCKED_CONFIRMED",
+            approval_status="blocked_confirmed",
+            approval_action=analyst_action,
+            approval_note=note,
+            reviewed_by=DEFAULT_REVIEWER,
+            control_action="confirm_block",
+            control_status=control_status,
+        )
+        return "Block confirmed by analyst."
+
+    update_investigation_approval(
+        event_id=event_id,
+        final_status="ESCALATED",
+        approval_status="escalated",
+        approval_action="ESCALATE",
+        approval_note=note,
+        reviewed_by=DEFAULT_REVIEWER,
+        control_action=str(row.get("control_action") or "hold"),
+        control_status="escalated",
+    )
+    return "Transaction escalated for further review."
 
 
 def _derive_reason_metadata(investigation_output: InvestigationResult) -> tuple[str, list[str]]:
@@ -521,8 +712,9 @@ def process_next_transaction(model: CatBoostClassifier, raw_data: pd.DataFrame) 
         control_payload = {}
         control_ack = {}
         control_status = "not_required"
-        if investigation_output.control_action == "reroute" and investigation_output.human_review_required:
-            control_payload, control_ack, control_status = issue_reroute_command(
+        is_held_for_approval = final_status == "HELD_PENDING_APPROVAL"
+        if is_held_for_approval:
+            control_payload, control_ack, control_status = issue_hold_command(
                 event_id=event_id,
                 sample=sample,
                 investigation_output=investigation_output,
@@ -548,10 +740,17 @@ def process_next_transaction(model: CatBoostClassifier, raw_data: pd.DataFrame) 
             "reasoning": investigation_output.reasoning,
             "reason_code": reason_code,
             "reason_tags_json": _safe_json_text({"reason_tags": reason_tags}),
-            "control_action": investigation_output.control_action,
+            "control_action": "hold" if is_held_for_approval else investigation_output.control_action,
             "control_status": control_status,
             "control_command_json": _safe_json_text(control_payload),
             "control_ack_json": _safe_json_text(control_ack),
+            "approval_status": "pending_approval" if is_held_for_approval else "not_required",
+            "approval_action": "",
+            "approval_time": "",
+            "approval_note": "",
+            "reviewed_by": "",
+            "release_command_json": "",
+            "release_ack_json": "",
             "evidence_json": _safe_json_text({"evidence": investigation_output.evidence}),
             "tool_trace_json": _safe_json_text({"tool_trace": investigation_output.tool_trace}),
             "agent_latency_s": round(agent_latency_s, 4),
@@ -582,7 +781,7 @@ def render_graphs() -> None:
     if "risk_score" not in chart_df.columns:
         chart_df["risk_score"] = (
             chart_df.get("anomaly_label", pd.Series(dtype=str))
-            .map({"Agent Blocked": 90.0, "ML Fraud": 65.0, "Clean": 5.0})
+            .map({"Held Pending Approval": 90.0, "Agent Blocked": 90.0, "ML Fraud": 65.0, "Clean": 5.0})
             .fillna(0.0)
         )
     else:
@@ -592,7 +791,7 @@ def render_graphs() -> None:
         .size()
         .rename(columns={"size": "count"})
     )
-    order = ["Clean", "ML Fraud", "Agent Blocked"]
+    order = ["Clean", "ML Fraud", "Held Pending Approval"]
     fig = px.bar(
         grouped,
         x="type",
@@ -603,6 +802,7 @@ def render_graphs() -> None:
         color_discrete_map={
             "Clean": "#4C78A8",
             "ML Fraud": "#F58518",
+            "Held Pending Approval": "#E45756",
             "Agent Blocked": "#E45756",
         },
         title="Transaction Type vs Classification Layer",
@@ -628,12 +828,12 @@ def render_graphs() -> None:
 def render_decision_funnel() -> None:
     processed = st.session_state.stream_index
     ml_fraud = st.session_state.ml_anomaly_count
-    blocked = st.session_state.agent_block_count
+    held = st.session_state.agent_block_count
     overrides = st.session_state.override_count
     fig = go.Figure(
         go.Bar(
-            x=["Processed", "ML Fraud", "Agent Blocked", "ML Overrides"],
-            y=[processed, ml_fraud, blocked, overrides],
+            x=["Processed", "ML Fraud", "Held", "ML Overrides"],
+            y=[processed, ml_fraud, held, overrides],
             marker_color=["#4C78A8", "#F58518", "#E45756", "#72B7B2"],
         )
     )
@@ -751,6 +951,7 @@ def _compact_display(value: object, decimals: int = 2) -> str:
 
 
 def _render_detail_summary(row: pd.Series) -> None:
+    status = html.escape(str(row.get("final_status") or "N/A"))
     verdict = html.escape(str(row.get("final_verdict") or "N/A"))
     risk_score = html.escape(_compact_display(row.get("risk_score"), decimals=1))
     reason_code = html.escape(_compact_display(row.get("reason_code"), decimals=0))
@@ -759,6 +960,10 @@ def _render_detail_summary(row: pd.Series) -> None:
     st.markdown(
         f"""
         <div class="investigation-summary">
+            <div class="summary-tile">
+                <span>Status</span>
+                <strong>{status}</strong>
+            </div>
             <div class="summary-tile">
                 <span>Verdict</span>
                 <strong>{verdict}</strong>
@@ -795,7 +1000,10 @@ def render_investigation_event_log() -> None:
         "nameDest",
         "txn_type",
         "amount",
+        "final_status",
         "final_verdict",
+        "approval_status",
+        "approval_action",
         "reason_code",
         "control_action",
         "control_status",
@@ -830,7 +1038,13 @@ def render_investigation_event_log() -> None:
     st.dataframe(event_display_df[visible_columns], use_container_width=True, height=260)
 
     st.markdown("**Investigation Reason Details**")
-    details_df = event_df.head(10).copy()
+    pending_df = event_df[event_df["final_status"].astype(str) == "HELD_PENDING_APPROVAL"]
+    details_df = (
+        pd.concat([pending_df, event_df.head(10)], ignore_index=True)
+        .drop_duplicates(subset=["event_id"])
+        .head(30)
+        .copy()
+    )
     details_df["event_id"] = details_df["event_id"].astype(str)
     event_ids = details_df["event_id"].tolist()
 
@@ -845,8 +1059,9 @@ def render_investigation_event_log() -> None:
         event_time = str(row.get("event_time", ""))
         event_time = event_time[-8:] if len(event_time) >= 8 else event_time
         verdict = str(row.get("final_verdict") or "N/A").upper()
+        status = str(row.get("final_status") or "N/A")
         label_lookup[str(row.get("event_id"))] = (
-            f"{row.get('nameOrig', 'N/A')} | {event_time} | {verdict}"
+            f"{row.get('nameOrig', 'N/A')} | {event_time} | {verdict} | {status}"
         )
 
     selected_event_id = st.selectbox(
@@ -864,7 +1079,7 @@ def render_investigation_event_log() -> None:
     # Keep inline analyst inputs scoped to the currently selected investigation.
     if st.session_state.get("analyst_selected_event_id") != selected_event_id:
         st.session_state["analyst_selected_event_id"] = selected_event_id
-        st.session_state["analyst_action_inline"] = "CONFIRM_BLOCK"
+        st.session_state["analyst_action_inline"] = "APPROVE_RELEASE"
         st.session_state["analyst_note_inline"] = ""
 
     _render_detail_summary(row)
@@ -909,13 +1124,19 @@ def render_investigation_event_log() -> None:
     st.markdown("&nbsp;", unsafe_allow_html=True)
     st.markdown("**Analyst Review**")
     st.caption(f"Selected Event: {selected_event_id}")
+    review_success_message = st.session_state.pop("analyst_review_success", "")
+    if review_success_message:
+        st.success(review_success_message)
+
     selected_verdict = str(row.get("final_verdict") or "").upper()
-    if selected_verdict == "BLOCK":
-        if st.session_state.get("analyst_action_inline") not in {"CONFIRM_BLOCK", "ESCALATE"}:
-            st.session_state["analyst_action_inline"] = "CONFIRM_BLOCK"
+    final_status = str(row.get("final_status") or "").upper()
+    if selected_verdict == "BLOCK" and final_status == "HELD_PENDING_APPROVAL":
+        valid_actions = {"APPROVE_RELEASE", "CONFIRM_BLOCK", "ESCALATE"}
+        if st.session_state.get("analyst_action_inline") not in valid_actions:
+            st.session_state["analyst_action_inline"] = "APPROVE_RELEASE"
         st.selectbox(
             "Analyst Action",
-            ["CONFIRM_BLOCK", "ESCALATE"],
+            ["APPROVE_RELEASE", "CONFIRM_BLOCK", "ESCALATE"],
             key="analyst_action_inline",
         )
         st.text_area(
@@ -924,13 +1145,28 @@ def render_investigation_event_log() -> None:
             key="analyst_note_inline",
             height=100,
         )
-        if st.button("Save Analyst Review", use_container_width=True, key="save_analyst_review_inline"):
+        if st.button("Submit Analyst Decision", use_container_width=True, key="save_analyst_review_inline"):
+            analyst_action = str(st.session_state.get("analyst_action_inline", "APPROVE_RELEASE"))
+            analyst_note = str(st.session_state.get("analyst_note_inline", ""))
             persist_analyst_review(
                 selected_event_id,
-                str(st.session_state.get("analyst_action_inline", "CONFIRM_BLOCK")),
-                str(st.session_state.get("analyst_note_inline", "")),
+                analyst_action,
+                analyst_note,
             )
-            st.success("Analyst review saved to audit log.")
+            st.session_state["analyst_review_success"] = apply_analyst_approval(
+                row,
+                analyst_action,
+                analyst_note,
+            )
+            st.rerun()
+    elif selected_verdict == "BLOCK":
+        approval_status = row.get("approval_status") or "reviewed"
+        approval_time = row.get("approval_time") or "N/A"
+        reviewed_by = row.get("reviewed_by") or DEFAULT_REVIEWER
+        st.success(
+            f"Decision completed: {final_status or approval_status}. "
+            f"Reviewed by {reviewed_by} at {approval_time}."
+        )
     else:
         st.info("Analyst review is enabled only for blocked investigations.")
 
@@ -976,7 +1212,7 @@ def render_visual_theme() -> None:
         }
         .investigation-summary {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 8px;
             margin: 10px 0 14px;
         }
@@ -1031,7 +1267,7 @@ def render_live_monitoring_fragment(model: CatBoostClassifier, raw_data: pd.Data
     met1, met2, met3, met4, met5 = st.columns(5)
     met1.metric("Processed", st.session_state.stream_index)
     met2.metric("ML Anomalies", st.session_state.ml_anomaly_count)
-    met3.metric("Agent Blocked", st.session_state.agent_block_count)
+    met3.metric("Held", st.session_state.agent_block_count)
     met4.metric("ML Overrides", st.session_state.override_count)
     met5.metric("Total Latency", f"{st.session_state.last_total_latency_ms:.1f} ms")
 
@@ -1062,8 +1298,8 @@ def main() -> None:
     init_audit_tables()
     ensure_fresh_boot_state()
     st.title("AGORA Risk Command Center")
-    st.caption("CatBoost flags risk, then the investigation agent confirms or overturns each fraud alert.")
-    st.caption(f"Live stream source: {LIVE_STREAM_FILE}")
+    # st.caption("CatBoost flags risk, then the investigation agent confirms or overturns each fraud alert.")
+    # st.caption(f"Live stream source: {LIVE_STREAM_FILE}")
 
     init_state()
     model, raw_data = load_assets()
