@@ -16,7 +16,7 @@ This design keeps the fast ML model in the critical path while adding explainabl
 
 ## Dataset Description
 
-The project uses a PaySim-style transaction dataset stored locally as `log.csv`.
+Online Fraud Detection Dataset :- [Kaggale](https://www.kaggle.com/datasets/rupakroy/online-payments-fraud-detection-dataset/code) .
 
 Dataset shape:
 
