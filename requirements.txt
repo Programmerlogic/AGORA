@@ -9,3 +9,6 @@ langchain
 langchain-core
 langchain-groq
 python-dotenv
+fastapi
+uvicorn
+requests

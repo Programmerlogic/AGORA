@@ -224,6 +224,31 @@ The Streamlit dashboard in `dashboard.py` provides:
 
 The live monitoring section uses Streamlit fragments so the live stream can update without forcing a full app rerun for every transaction.
 
+## API Mode (Payload Streaming)
+
+AGORA now includes a backend API (`api.py`) for packet/payload-style transaction ingestion.
+
+Instead of only simulating from `X_test.csv` inside Streamlit, you can now send transaction payloads to:
+
+```text
+POST /transactions
+```
+
+The API performs:
+
+- CatBoost first-pass scoring.
+- Agentic second-look investigation for ML-flagged transactions.
+- Hold/release/block lifecycle persistence in SQLite.
+- Analyst decision handling via API:
+  - `POST /transactions/{transaction_id}/analyst-decision`
+
+Helper endpoints:
+
+- `POST /accounts` (create/update simulated ledger accounts)
+- `GET /ledger/accounts`
+- `GET /transactions/{transaction_id}`
+- `GET /events`
+
 ## DB Insights Chatbot
 
 The DB Insights chatbot is implemented in `db_chat.py`.
@@ -259,6 +284,8 @@ Which users have the highest fraud transaction counts?
 | `X_test.csv` | Test feature rows used for live stream simulation. |
 | `risk_agent.py` | Agentic AI risk investigation layer. |
 | `dashboard.py` | Streamlit dashboard and live monitoring interface. |
+| `api.py` | FastAPI backend for payload ingestion and transaction lifecycle control. |
+| `stream_sender.py` | Row-to-payload streaming client from `X_test.csv` into the API. |
 | `db_chat.py` | Read-only database insights chatbot. |
 | `requirements.txt` | Python package requirements. |
 | `.env` | Environment variables such as `GROQ_API_KEY`. |
@@ -287,6 +314,18 @@ Run the dashboard:
 
 ```bash
 streamlit run dashboard.py
+```
+
+Run API mode:
+
+```bash
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+Stream payloads from `X_test.csv` to the API:
+
+```bash
+python stream_sender.py --api-url http://localhost:8000 --count 100 --interval-ms 400
 ```
 
 Optional model workflow:
