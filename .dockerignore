@@ -1,0 +1,28 @@
+# Large data files — DB is mounted as volume, log.csv not needed in deployment
+agora_transactions.db
+log.csv
+
+# Virtual environment
+myenv/
+
+# Git
+.git/
+.gitignore
+
+# IDE / cache
+.vscode/
+__pycache__/
+
+# Secrets — passed via environment variable
+.env
+
+# Training notebook — not needed at runtime
+train.ipynb
+
+# Deployment scripts — not needed inside container
+deploy/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

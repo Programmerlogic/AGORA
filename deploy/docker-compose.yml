@@ -1,0 +1,17 @@
+services:
+  agora:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: agora
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount the SQLite database from the host — not baked into the image
+      - ../data/agora_transactions.db:/app/agora_transactions.db
+    env_file:
+      - ../.env
+    restart: unless-stopped
+    # Memory guard for t2.micro (1GB RAM + 2GB swap)
+    mem_limit: 800m
+    memswap_limit: 1600m

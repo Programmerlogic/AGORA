@@ -13,6 +13,12 @@ DB_PATH = "agora_transactions.db"
 GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_API_KEY_ENV = "GROQ_API_KEY"
 DEFAULT_LIMIT = 50
+
+
+def _get_db_connection(timeout: int = 20) -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 SUGGESTED_QUESTIONS = [
     "Show fraud count by transaction type",
     "How many transactions were processed in total?",
@@ -46,7 +52,7 @@ def _get_groq_api_key() -> str:
 
 
 def _get_schema_text() -> str:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _get_db_connection() as conn:
         rows = conn.execute("PRAGMA table_info(transactions)").fetchall()
     if not rows:
         return "Table transactions is unavailable."
@@ -88,7 +94,7 @@ def _sanitize_sql(sql_text: str) -> str:
 
 
 def _execute_readonly_query(sql: str) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _get_db_connection() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(sql).fetchall()
     return [dict(row) for row in rows]
