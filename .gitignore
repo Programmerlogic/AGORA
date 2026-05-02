@@ -1,0 +1,8 @@
+myenv/
+.vscode/
+__pycache__/
+.env
+log.csv
+agora_transactions.db
+deploy/*.pem
+*.tar.gz

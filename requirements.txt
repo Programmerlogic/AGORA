@@ -9,3 +9,5 @@ langchain
 langchain-core
 langchain-groq
 python-dotenv
+streamlit
+plotly
