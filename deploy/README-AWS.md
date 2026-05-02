@@ -34,22 +34,10 @@ Complete step-by-step guide to deploy AGORA on AWS for **$0/month** using Free T
 
 5. Click **Launch Instance**
 
----
+## Step 2: SSH into EC2 and Run Setup
 
-## Step 2: Allocate Elastic IP (Free)
-
-An Elastic IP gives you a static public IP that won't change when you stop/start the instance.
-
-1. Go to **EC2 → Elastic IPs** → **Allocate Elastic IP address**
-2. Click **Allocate**
-3. Select the new IP → **Actions → Associate Elastic IP address**
-4. Choose your `agora-dashboard` instance → **Associate**
-
-> ⚠️ **Important**: An Elastic IP is free ONLY while associated with a running instance. If you stop the instance, the IP costs ~$0.005/hr. Either release it when not using, or keep the instance running.
-
----
-
-## Step 3: SSH into EC2 and Run Setup
+1. Go to the EC2 Console, select your instance, and copy the **Public IPv4 address**.
+2. From your local machine (Git Bash / terminal):
 
 ```bash
 # Move the key file to a safe location and set permissions
@@ -57,7 +45,7 @@ An Elastic IP gives you a static public IP that won't change when you stop/start
 chmod 400 ~/Downloads/agora-key.pem
 
 # SSH into the instance
-ssh -i ~/Downloads/agora-key.pem ubuntu@<ELASTIC_IP>
+ssh -i ~/Downloads/agora-key.pem ubuntu@<PUBLIC_IP>
 ```
 
 Once connected:
@@ -77,7 +65,7 @@ After setup completes, **log out and log back in** so Docker group membership ta
 
 ```bash
 exit
-ssh -i ~/Downloads/agora-key.pem ubuntu@<ELASTIC_IP>
+ssh -i ~/Downloads/agora-key.pem ubuntu@<PUBLIC_IP>
 ```
 
 Verify Docker works:
@@ -89,7 +77,7 @@ free -h  # Should show ~2GB swap
 
 ---
 
-## Step 4: Deploy from Your Local Machine
+## Step 3: Deploy from Your Local Machine
 
 From your project directory (Git Bash on Windows):
 
@@ -100,7 +88,7 @@ cd /d/PROJECTS/AGORA
 chmod +x deploy/deploy.sh
 
 # Run deployment
-bash deploy/deploy.sh <ELASTIC_IP> ~/Downloads/agora-key.pem
+bash deploy/deploy.sh <PUBLIC_IP> ~/Downloads/agora-key.pem
 ```
 
 The script will:
@@ -114,12 +102,12 @@ The script will:
 
 ---
 
-## Step 5: Access the Dashboard
+## Step 4: Access the Dashboard
 
 Open your browser and go to:
 
 ```
-http://<ELASTIC_IP>:8501
+http://<PUBLIC_IP>:8501
 ```
 
 You should see the AGORA fraud monitoring dashboard.
