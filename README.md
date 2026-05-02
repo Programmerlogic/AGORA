@@ -309,3 +309,7 @@ This project demonstrates a practical fraud-risk architecture, but production de
 - Replacement of the local SQLite simulated backend with real payment hold/release APIs.
 
 AGORA is designed as a human-in-the-loop risk analysis system: the ML model provides speed, the agent provides contextual investigation, and the analyst review layer provides operational accountability.
+
+## VISUALS
+<img width="1920" height="3115" alt="screencapture-localhost-8502-2026-04-29-03_29_31" src="https://github.com/user-attachments/assets/03760e33-fbdd-4938-87d4-858780137cd6" />
+
