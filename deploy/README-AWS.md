@@ -31,6 +31,7 @@ Complete step-by-step guide to deploy AGORA on AWS for **$0/month** using Free T
 |---|---|---|---|
 | SSH | 22 | My IP | SSH access |
 | Custom TCP | 8501 | 0.0.0.0/0 | Streamlit dashboard |
+| Custom TCP | 8000 | 0.0.0.0/0 | FastAPI Backend API |
 
 5. Click **Launch Instance**
 

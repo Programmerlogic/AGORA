@@ -289,6 +289,15 @@ Run the dashboard:
 streamlit run dashboard.py
 ```
 
+Run the backend API (in a separate terminal):
+
+```bash
+python api.py
+# or
+uvicorn api:app --reload --host 127.0.0.1 --port 8000
+```
+Once running, the API documentation is available at `http://localhost:8000/docs`.
+
 Optional model workflow:
 
 ```text

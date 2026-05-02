@@ -11,3 +11,5 @@ langchain-groq
 python-dotenv
 streamlit
 plotly
+fastapi
+uvicorn

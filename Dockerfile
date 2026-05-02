@@ -16,6 +16,7 @@ COPY dashboard.py .
 COPY risk_agent.py .
 COPY db_chat.py .
 COPY populate_db.py .
+COPY api.py .
 COPY agora_fraud_model.cbm .
 COPY X_test.csv .
 COPY .streamlit/ .streamlit/
@@ -24,12 +25,7 @@ COPY .streamlit/ .streamlit/
 # GROQ_API_KEY is passed as an environment variable at runtime.
 
 EXPOSE 8501
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
-
-ENTRYPOINT ["streamlit", "run", "dashboard.py", \
-    "--server.port=8501", \
-    "--server.address=0.0.0.0", \
-    "--server.headless=true", \
-    "--browser.gatherUsageStats=false"]
+    CMD curl -f http://localhost:8501/_stcore/health || curl -f http://localhost:8000/docs || exit 1

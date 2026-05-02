@@ -1,17 +1,32 @@
 services:
-  agora:
+  dashboard:
     build:
       context: ..
       dockerfile: Dockerfile
-    container_name: agora
+    command: ["streamlit", "run", "dashboard.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    container_name: agora_dashboard
     ports:
       - "8501:8501"
     volumes:
-      # Mount the SQLite database from the host — not baked into the image
       - ../data/agora_transactions.db:/app/agora_transactions.db
     env_file:
       - ../.env
     restart: unless-stopped
-    # Memory guard for t2.micro (1GB RAM + 2GB swap)
-    mem_limit: 800m
-    memswap_limit: 1600m
+    mem_limit: 500m
+    memswap_limit: 1000m
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+    container_name: agora_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data/agora_transactions.db:/app/agora_transactions.db
+    env_file:
+      - ../.env
+    restart: unless-stopped
+    mem_limit: 300m
+    memswap_limit: 600m

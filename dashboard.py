@@ -1345,7 +1345,7 @@ from catboost import CatBoostClassifier
 from db_chat import answer_db_question, get_suggested_questions
 from risk_agent import InvestigationResult, run_investigation
 
-STREAM_SLEEP_SECONDS = 0.75
+STREAM_SLEEP_SECONDS = 7.5 #
 MAX_LOG_ROWS = 200
 MAX_CHART_ROWS = 500
 MAX_INVESTIGATION_EVENT_ROWS = 2000
